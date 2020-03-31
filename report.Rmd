@@ -1,0 +1,127 @@
+---
+title: "Practical Machine Learning Project Report"
+author: "Stefano Fornasaro"
+date: "3/31/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.  
+
+In this project, I used data from accelerometers on the belt, forearm, arm, and dumbell of 6 research study participants to predict the manner in which they did the exercise. Here I report the code I used to build the model, to estimate the out-of-sample error, and to predict the test set. I also include a description of each step of the process.
+
+## Data Preparation
+```{r}
+library(caret)
+```
+### Download the Data
+```{r}
+trainUrl <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+```  
+### Read the Data
+```{r}
+ftrain <- read.csv(url(trainUrl))
+ftest <- read.csv(url(testUrl))
+dim(ftrain)
+dim(ftest)
+```
+The training data set contains 19622 observations and 160 variables, while the testing data set contains 20 observations and 160 variables. The "classe" variable in the training set is the outcome variable. 
+
+### Create data partition
+Randomly split the full training data (ftrain) into a smaller training set (trainData, 70%) and a validation set (testData, 30%). 
+
+```{r}
+set.seed(1235) # For reproducibile purpose
+inTrain <- createDataPartition(ftrain$classe, p=0.70, list=F)
+trainData <- ftrain[inTrain, ]
+testData <- ftrain[-inTrain, ]
+```
+
+
+### Clean the data
+In this step, reduce the number of features. Note that I decide which ones to remove by analyzing trainData, and perform the identical removals on testData:
+
+```{r}
+# remove the first 5 columns, containing variables that don't contribute much to the accelerometer measurements (X, user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp)
+trainData <- trainData[, -(1:5)]
+testData <- testData[, -(1:5)]
+
+# remove variables with nearly zero variance
+nzv <- caret::nearZeroVar(trainData)
+trainData <- trainData[, -nzv]
+testData <- testData[, -nzv]
+
+# remove variables that are almost always NA
+mostlyNA <- sapply(trainData, function(x) mean(is.na(x))) > 0.95
+trainData <- trainData[, mostlyNA==F]
+testData <- testData[, mostlyNA==F]
+
+dim(trainData)
+dim(testData)
+
+```
+
+Now, the cleaned training data set contains 13737 observations and 54 variables, while the testing data set contains 20 observations and 54 variables.
+
+
+## Modeling
+train a **Random Forest** model with a **10-fold cross validation** to select optimal tuning parameters for the model.  
+```{r}
+controlRf <- trainControl(method="cv", 10,verboseIter=F)
+modelRf <- train(classe ~ ., data=trainData, method="rf", trControl=controlRf)
+modelRf$finalModel
+```
+
+It decided to use 500 trees and try 27 variables at each split.
+
+Then, I use the fitted model to predict the label (“classe”) in the validation set (testData), and show the confusion matrix to estimate the performance of the model.
+
+```{r}
+predictRf <- predict(modelRf, testData)
+confusionMatrix(testData$classe, predictRf)
+
+```
+So, the estimated accuracy of the model is 99.7% and the estimated out-of-sample error is 0.3%.
+
+## Predicting for Test Data Set
+
+### Re-training the Selected Model
+Before predicting on the test set, it is important to train the model on the full training set (ftrain), rather than using a model trained on a reduced training set (trainData), in order to produce the most accurate predictions. 
+
+
+```{r}
+# remove the first five columns
+ftrain <- ftrain[, -(1:5)]
+ftest <- ftest[, -(1:5)]
+
+# remove variables with nearly zero variance
+nzv <- nearZeroVar(ftrain)
+ftrain <- ftrain[, -nzv]
+ftest <- ftest[, -nzv]
+
+# remove variables that are almost always NA
+mostlyNA <- sapply(ftrain, function(x) mean(is.na(x))) > 0.95
+ftrain <- ftrain[, mostlyNA==F]
+ftest <- ftest[, mostlyNA==F]
+
+# re-fit model using full training set (ftrain)
+fControl <- trainControl(method="cv", number=10, verboseIter=F)
+model <- train(classe ~ ., data=ftrain, method="rf", trControl=fControl)
+```  
+
+
+### Making Test Set Predictions
+Use the model on ftrain to predict the label for the observations in ftest
+```{r}
+# predict on test set
+preds <- predict(model, newdata=ftest)
+preds
+
+```
